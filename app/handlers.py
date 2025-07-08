@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import time
 
-from app.states import CreateSchedule
+from app.states import CreateSchedule, DeleteSchedule
 from app.config import ADMINS
 from app.database.session import SessionLocal
 from app.database.models import Schedule
@@ -21,7 +21,9 @@ def is_admin(message: Message) -> bool:
 async def cmd_start(message: Message):
     if not is_admin(message):
         return
-    await message.answer('Привет! Я бот для рассылок.\nНапиши /create чтобы создать новую. /jobs для просмотра запланированных задач.')
+    await message.answer('Привет! Я бот для рассылок.\nНапиши /create чтобы создать новую. ' \
+    '\n/delete для удаления существующей.' \
+    '\n/jobs для просмотра запланированных задач.')
 
 
 @router.message(Command('id'))
@@ -88,7 +90,7 @@ async def cmd_jobs(message: Message):
     session.close()
 
     if not tasks:
-        await message.answer('📭 Нет задач в базе.')
+        await message.answer('Нет задач в базе.')
         return
 
     text = 'Задачи в БД:\n'
@@ -97,13 +99,58 @@ async def cmd_jobs(message: Message):
         text += f'\nID {task.id} | TIME {task.time.strftime('%H:%M')} | {status}\nTEXT: {task.text[:30]}...\n'
 
     # список запланированных задач
-    text += '\n🕒 Запланированные задачи:\n'
+    text += '\nЗапланированные задачи:\n'
     jobs = schedule_manager.scheduler.get_jobs()
     if not jobs:
         text += 'Нет активных задач.\n'
     else:
         for job in jobs:
             next_run = job.next_run_time.strftime('%H:%M') if job.next_run_time else '—'
-            text += f'• {job.id} → ⏱ {next_run}\n'
+            text += f'• {job.id} → {next_run}\n'
 
     await message.answer(text)
+
+
+@router.message(Command('delete'))
+async def delete_command(message: Message, state: FSMContext):
+    session = SessionLocal()
+    tasks = session.query(Schedule).filter(Schedule.user_id == message.from_user.id).all()
+    session.close()
+
+    if not tasks:
+        await message.answer('У вас нет активных рассылок.')
+        return
+
+    text = 'Введите ID рассылки, которую хотите удалить:\n\n'
+    for task in tasks:
+        text += f'\nID {task.id} | TIME {task.time.strftime('%H:%M')} | TEXT: {task.text[:30]}...\n'
+
+    await message.answer(text)
+    await state.set_state(DeleteSchedule.waiting_for_task_id)
+
+
+@router.message(DeleteSchedule.waiting_for_task_id)
+async def process_delete(message: Message, state: FSMContext):
+    try:
+        task_id = int(message.text.strip())
+    except ValueError:
+        await message.answer('Неверный ID. Введите число.')
+        return
+
+    session = SessionLocal()
+    task = session.query(Schedule).filter(Schedule.id == task_id, Schedule.user_id == message.from_user.id).first()
+
+    if not task:
+        session.close()
+        await message.answer('Рассылка не найдена')
+        await state.clear()
+        return
+
+    session.delete(task)
+    session.commit()
+    session.close()
+
+    schedule_manager.remove_job(str(task_id))
+
+    await message.answer(f'Рассылка с ID {task_id} удалена.')
+    await state.clear()
