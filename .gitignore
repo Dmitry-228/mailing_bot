@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.log
+
+# .env-файл
+.env
+
+# Виртуальное окружение
+venv/
+.env/
+
+# IDE (например, VSCode)
+.vscode/
+.idea/
