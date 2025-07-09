@@ -1,16 +1,17 @@
-# from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-# admin_main_menu = ReplyKeyboardMarkup(
-#     keyboard=[
-#         [
-#             KeyboardButton(text="📤 Создать"),
-#             KeyboardButton(text="📋 Список"),
-#         ],
-#         [
-#             KeyboardButton(text="🗑 Удалить"),
-#             KeyboardButton(text="✏️ Изменить"),
-#         ]
-#     ],
-#     resize_keyboard=True,
-#     input_field_placeholder="Выберите действие"
-# )
+start_button = KeyboardButton(text="СТАРТ")
+
+admin_main_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="СОЗДАТЬ"),
+            KeyboardButton(text="СПИСОК РАССЫЛОК"),
+        ],
+        [
+            KeyboardButton(text="УДАЛИТЬ РАССЫЛКУ"),
+        ]
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите действие"
+)

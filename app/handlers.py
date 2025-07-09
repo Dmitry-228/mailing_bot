@@ -1,5 +1,5 @@
-from aiogram import Router
-from aiogram.types import Message
+from aiogram import Router, F
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import time
@@ -7,10 +7,11 @@ from sqlalchemy import select
 import logging
 
 from app.states import CreateSchedule, DeleteSchedule
-from app.config import ADMINS
+from config import ADMINS
 from app.database.session import async_session
 from app.database.models import Schedule
 from app.scheduler import ScheduleManager
+from app.keyboards import admin_main_menu
 
 
 router = Router()
@@ -27,14 +28,19 @@ def is_admin(message: Message) -> bool:
     return message.from_user.id in ADMINS
 
 
+@router.message(F.text == "СТАРТ")
+async def handle_start_button(message: Message):
+    await message.answer(
+        "Добро пожаловать! Клавиатура скрыта.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
 @router.message(Command('start'))
 async def cmd_start(message: Message):
     if not is_admin(message):
         return
-    await message.answer('Привет! Я бот для рассылок.' \
-    '\nНапиши /create чтобы создать новую. ' \
-    '\n/delete для удаления существующей.' \
-    '\n/jobs для просмотра запланированных задач.')
+    await message.answer('Привет! Я бот для рассылок. Выберите действие:', reply_markup=admin_main_menu)
 
 
 @router.message(Command('id'))
@@ -43,6 +49,7 @@ async def cmd_id(message: Message):
 
 
 @router.message(Command('create'))
+@router.message(F.text == "СОЗДАТЬ")
 async def cmd_create(message: Message, state: FSMContext):
     if not is_admin(message):
         return
@@ -92,6 +99,7 @@ async def fsm_get_time(message: Message, state: FSMContext):
 
 
 @router.message(Command('jobs'))
+@router.message(F.text == "СПИСОК РАССЫЛОК")
 async def cmd_jobs(message: Message):
     if not is_admin(message):
         return
@@ -124,6 +132,7 @@ async def cmd_jobs(message: Message):
 
 
 @router.message(Command('delete'))
+@router.message(F.text == "УДАЛИТЬ РАССЫЛКУ")
 async def delete_command(message: Message, state: FSMContext):
     async with async_session() as session:
         result = await session.execute(select(Schedule).where(Schedule.user_id == message.from_user.id))
