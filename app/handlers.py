@@ -28,10 +28,10 @@ def is_admin(message: Message) -> bool:
     return message.from_user.id in ADMINS
 
 
-@router.message(F.text == "СТАРТ")
+@router.message(F.text == 'СТАРТ')
 async def handle_start_button(message: Message):
     await message.answer(
-        "Добро пожаловать! Клавиатура скрыта.",
+        'Добро пожаловать!',
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -49,7 +49,7 @@ async def cmd_id(message: Message):
 
 
 @router.message(Command('create'))
-@router.message(F.text == "СОЗДАТЬ")
+@router.message(F.text == 'СОЗДАТЬ')
 async def cmd_create(message: Message, state: FSMContext):
     if not is_admin(message):
         return
@@ -99,7 +99,7 @@ async def fsm_get_time(message: Message, state: FSMContext):
 
 
 @router.message(Command('jobs'))
-@router.message(F.text == "СПИСОК РАССЫЛОК")
+@router.message(F.text == 'СПИСОК РАССЫЛОК')
 async def cmd_jobs(message: Message):
     if not is_admin(message):
         return
@@ -117,7 +117,6 @@ async def cmd_jobs(message: Message):
         status = 'Активна' if task.active else 'Отключена'
         text += f'\nID {task.id} | TIME {task.time.strftime('%H:%M')} | {status}\nTEXT: {task.text[:30]}...\n'
 
-    # список запланированных задач
     text += '\nЗапланированные задачи:\n'
     jobs = schedule_manager.scheduler.get_jobs()
     if not jobs:
@@ -132,7 +131,7 @@ async def cmd_jobs(message: Message):
 
 
 @router.message(Command('delete'))
-@router.message(F.text == "УДАЛИТЬ РАССЫЛКУ")
+@router.message(F.text == 'УДАЛИТЬ РАССЫЛКУ')
 async def delete_command(message: Message, state: FSMContext):
     async with async_session() as session:
         result = await session.execute(select(Schedule).where(Schedule.user_id == message.from_user.id))

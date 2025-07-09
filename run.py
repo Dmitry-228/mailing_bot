@@ -36,9 +36,18 @@ async def main():
         await dp.start_polling(bot)
     finally:
         logging.info('Завершаем работу...')
-        await bot.session.close()
-        await schedule_manager.scheduler.shutdown()
-        await engine.dispose()
+        try:
+            await schedule_manager.scheduler.shutdown()
+        except Exception as e:
+            logging.error(f'Ошибка при завершении планировщика: {e}')
+        try:
+            await bot.session.close()
+        except Exception as e:
+            logging.error(f'Ошибка при закрытии сессии бота: {e}')
+        try:
+            await engine.dispose()
+        except Exception as e:
+            logging.error(f'Ошибка при закрытии соединения с БД: {e}')
         logging.info('Бот, планировщик и соединение с БД корректно завершены.')
 
 if __name__ == '__main__':
