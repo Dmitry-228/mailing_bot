@@ -9,23 +9,25 @@ from app.database.models import Base
 from app.database.session import engine 
  
 import logging 
- 
-logging.basicConfig(level=logging.INFO) 
- 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
 async def main(): 
-    # Создаём бота и диспетчер 
     bot = Bot(token=BOT_TOKEN) 
     dp = Dispatcher(storage=MemoryStorage()) 
-
-    # Инициализируем таблицы
-    async with engine.begin() as conn:
+    async with engine.begin() as conn:       # Инициализируем таблицы
         await conn.run_sync(Base.metadata.create_all)
 
-    # Планировщик рассылок 
     schedule_manager = ScheduleManager(bot) 
     await schedule_manager.start() 
 
-    # Передаём планировщик в хендлер через функцию
     handlers.set_schedule_manager(schedule_manager)
     dp.include_router(handlers.router) 
  

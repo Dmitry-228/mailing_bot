@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import time
 from sqlalchemy import select
+import logging
 
 from app.states import CreateSchedule, DeleteSchedule
 from app.config import ADMINS
@@ -14,6 +15,7 @@ from app.scheduler import ScheduleManager
 
 router = Router()
 schedule_manager: ScheduleManager = None
+logger = logging.getLogger(__name__)
 
 
 def set_schedule_manager(manager: ScheduleManager):
@@ -77,13 +79,15 @@ async def fsm_get_time(message: Message, state: FSMContext):
             session.add(task)
             await session.commit()
             await session.refresh(task)
-
+        logger.info(f'Создана рассылка: user_id={user_id}, task_id={task.id}, time={t}')
         # Добавляем в планировщик
         await schedule_manager.add_job(task.id, user_id, text, t)
+        logger.info(f'Задача добавлена в планировщик: task_id={task.id}')
 
         await message.answer(f'Рассылка создана и запланирована на {t.strftime('%H:%M')}')
         await state.clear()
-    except Exception:
+    except Exception as e:
+        logger.exception(f'Ошибка при создании рассылки: {e}')
         await message.answer('Неверный формат времени. Попробуйте снова: ЧЧ:ММ')
 
 
@@ -115,6 +119,7 @@ async def cmd_jobs(message: Message):
             next_run = job.next_run_time.strftime('%H:%M') if job.next_run_time else '—'
             text += f'• {job.id} → {next_run}\n'
 
+    logger.info(f'Пользователь {message.from_user.id} запросил список задач')
     await message.answer(text)
 
 
@@ -134,6 +139,7 @@ async def delete_command(message: Message, state: FSMContext):
 
     await message.answer(text)
     await state.set_state(DeleteSchedule.waiting_for_task_id)
+    logger.info(f'Пользователь {message.from_user.id} запросил удаление рассылки')
 
 
 @router.message(DeleteSchedule.waiting_for_task_id)
@@ -141,24 +147,22 @@ async def process_delete(message: Message, state: FSMContext):
     try:
         task_id = int(message.text.strip())
     except ValueError:
+        logger.warning(f'Пользователь {message.from_user.id} ввёл неверный ID для удаления')
         await message.answer('Неверный ID. Введите число.')
         return
-
     async with async_session() as session:
         result = await session.execute(
             select(Schedule).where(Schedule.id == task_id, Schedule.user_id == message.from_user.id)
         )
         task = result.scalars().first()
-
         if not task:
+            logger.warning(f'Пользователь {message.from_user.id} попытался удалить несуществующую рассылку ID {task_id}')
             await message.answer('Рассылка не найдена')
             await state.clear()
             return
-
         await session.delete(task)
         await session.commit()
-
+    logger.info(f'Пользователь {message.from_user.id} удалил рассылку ID {task_id}')
     await schedule_manager.remove_job(task_id)
-
     await message.answer(f'Рассылка с ID {task_id} удалена.')
     await state.clear()
