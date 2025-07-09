@@ -1,16 +1,24 @@
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import time
+from sqlalchemy import select
 
 from app.states import CreateSchedule, DeleteSchedule
 from app.config import ADMINS
-from app.database.session import SessionLocal
+from app.database.session import async_session
 from app.database.models import Schedule
+from app.scheduler import ScheduleManager
+
 
 router = Router()
-schedule_manager = None  # ← мы передадим его из app.py
+schedule_manager: ScheduleManager = None
+
+
+def set_schedule_manager(manager: ScheduleManager):
+    global schedule_manager
+    schedule_manager = manager
 
 
 def is_admin(message: Message) -> bool:
@@ -21,7 +29,8 @@ def is_admin(message: Message) -> bool:
 async def cmd_start(message: Message):
     if not is_admin(message):
         return
-    await message.answer('Привет! Я бот для рассылок.\nНапиши /create чтобы создать новую. ' \
+    await message.answer('Привет! Я бот для рассылок.' \
+    '\nНапиши /create чтобы создать новую. ' \
     '\n/delete для удаления существующей.' \
     '\n/jobs для просмотра запланированных задач.')
 
@@ -62,14 +71,15 @@ async def fsm_get_time(message: Message, state: FSMContext):
         text = data['text']
         user_id = message.from_user.id
 
-        # Сохраняем в БД
-        session = SessionLocal()
-        task = Schedule(user_id=user_id, text=text, time=t, active=True)
-        session.add(task)
-        session.commit()
+        # Сохраняем в БД (асинхронно)
+        async with async_session() as session:
+            task = Schedule(user_id=user_id, text=text, time=t, active=True)
+            session.add(task)
+            await session.commit()
+            await session.refresh(task)
 
         # Добавляем в планировщик
-        schedule_manager.add_job(task.id, user_id, text, t)
+        await schedule_manager.add_job(task.id, user_id, text, t)
 
         await message.answer(f'Рассылка создана и запланирована на {t.strftime('%H:%M')}')
         await state.clear()
@@ -82,12 +92,9 @@ async def cmd_jobs(message: Message):
     if not is_admin(message):
         return
 
-    from app.database.session import SessionLocal
-    from app.database.models import Schedule
-
-    session = SessionLocal()
-    tasks = session.query(Schedule).all()
-    session.close()
+    async with async_session() as session:
+        result = await session.execute(select(Schedule))
+        tasks = result.scalars().all()
 
     if not tasks:
         await message.answer('Нет задач в базе.')
@@ -113,9 +120,9 @@ async def cmd_jobs(message: Message):
 
 @router.message(Command('delete'))
 async def delete_command(message: Message, state: FSMContext):
-    session = SessionLocal()
-    tasks = session.query(Schedule).filter(Schedule.user_id == message.from_user.id).all()
-    session.close()
+    async with async_session() as session:
+        result = await session.execute(select(Schedule).where(Schedule.user_id == message.from_user.id))
+        tasks = result.scalars().all()
 
     if not tasks:
         await message.answer('У вас нет активных рассылок.')
@@ -123,7 +130,7 @@ async def delete_command(message: Message, state: FSMContext):
 
     text = 'Введите ID рассылки, которую хотите удалить:\n\n'
     for task in tasks:
-        text += f'\nID {task.id} | TIME {task.time.strftime('%H:%M')} | TEXT: {task.text[:30]}...\n'
+        text += f"\nID {task.id} | TIME {task.time.strftime('%H:%M')} | TEXT: {task.text[:30]}...\n"
 
     await message.answer(text)
     await state.set_state(DeleteSchedule.waiting_for_task_id)
@@ -137,20 +144,21 @@ async def process_delete(message: Message, state: FSMContext):
         await message.answer('Неверный ID. Введите число.')
         return
 
-    session = SessionLocal()
-    task = session.query(Schedule).filter(Schedule.id == task_id, Schedule.user_id == message.from_user.id).first()
+    async with async_session() as session:
+        result = await session.execute(
+            select(Schedule).where(Schedule.id == task_id, Schedule.user_id == message.from_user.id)
+        )
+        task = result.scalars().first()
 
-    if not task:
-        session.close()
-        await message.answer('Рассылка не найдена')
-        await state.clear()
-        return
+        if not task:
+            await message.answer('Рассылка не найдена')
+            await state.clear()
+            return
 
-    session.delete(task)
-    session.commit()
-    session.close()
+        await session.delete(task)
+        await session.commit()
 
-    schedule_manager.remove_job(str(task_id))
+    await schedule_manager.remove_job(task_id)
 
     await message.answer(f'Рассылка с ID {task_id} удалена.')
     await state.clear()

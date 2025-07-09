@@ -1,33 +1,36 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 from app.database.models import Schedule
-from app.database.session import SessionLocal
+from app.database.session import async_session
 import asyncio
 
 
 class ScheduleManager:
     def __init__(self, bot):
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = None
         self.bot = bot
-        self.loop = asyncio.get_event_loop()
+        self._eventloop = None
 
-    def start(self):
+    async def start(self):
+        loop = asyncio.get_running_loop()
+        self.scheduler = AsyncIOScheduler(event_loop=loop)
+        self._eventloop = loop
         self.scheduler.start()
-        self.load_jobs_from_db()
+        await self.load_jobs_from_db()
 
     def job_id(self, task_id: int) -> str:
         return f"task_{task_id}"
 
-    def load_jobs_from_db(self):
-        session: Session = SessionLocal()
-        tasks = session.query(Schedule).filter_by(active=True).all()
+    async def load_jobs_from_db(self):
+        async with async_session() as session:
+            result = await session.execute(
+                select(Schedule).where(Schedule.active == True)
+            )
+            tasks = result.scalars().all()
+            for task in tasks:
+                await self.add_job(task.id, task.user_id, task.text, task.time)
 
-        for task in tasks:
-            self.add_job(task.id, task.user_id, task.text, task.time)
-
-        session.close()
-
-    def add_job(self, task_id: int, user_id: int, text: str, time_obj):
+    async def add_job(self, task_id: int, user_id: int, text: str, time_obj):
         job_id = self.job_id(task_id)
 
         async def send():
@@ -47,7 +50,7 @@ class ScheduleManager:
         )
         print(f"Задача {job_id} добавлена на {time_obj.strftime('%H:%M')}")
 
-    def remove_job(self, task_id: int):
+    async def remove_job(self, task_id: int):
         job_id = self.job_id(task_id)
         try:
             self.scheduler.remove_job(job_id)
@@ -59,8 +62,7 @@ class ScheduleManager:
         def wrapper():
             print(f'Вызван wrapper() для async-задачи')
             try:
-                self.loop.create_task(async_func())
-                print('Задача успешно запущена через create_task()')
+                asyncio.run_coroutine_threadsafe(async_func(), self._eventloop)
             except Exception as e:
                 print(f'Ошибка при запуске задачи: {e}')
         return wrapper
