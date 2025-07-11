@@ -4,7 +4,6 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import time
 from sqlalchemy import select
-import logging
 
 from app.states import CreateSchedule, DeleteSchedule
 from config import ADMINS
@@ -12,11 +11,11 @@ from app.database.session import async_session
 from app.database.models import Schedule
 from app.scheduler import ScheduleManager
 from app.keyboards import admin_main_menu
+from logger import log_function, logger
 
 
 router = Router()
 schedule_manager: ScheduleManager = None
-logger = logging.getLogger(__name__)
 
 
 def set_schedule_manager(manager: ScheduleManager):
@@ -29,6 +28,7 @@ def is_admin(message: Message) -> bool:
 
 
 @router.message(F.text == 'СТАРТ')
+@log_function
 async def handle_start_button(message: Message):
     await message.answer(
         'Добро пожаловать!',
@@ -37,6 +37,7 @@ async def handle_start_button(message: Message):
 
 
 @router.message(Command('start'))
+@log_function
 async def cmd_start(message: Message):
     if not is_admin(message):
         return
@@ -44,12 +45,14 @@ async def cmd_start(message: Message):
 
 
 @router.message(Command('id'))
+@log_function
 async def cmd_id(message: Message):
     await message.answer(f'Ваш Telegram ID: {message.from_user.id}')
 
 
 @router.message(Command('create'))
 @router.message(F.text == 'СОЗДАТЬ')
+@log_function
 async def cmd_create(message: Message, state: FSMContext):
     if not is_admin(message):
         return
@@ -58,6 +61,7 @@ async def cmd_create(message: Message, state: FSMContext):
 
 
 @router.message(CreateSchedule.waiting_for_text)
+@log_function
 async def fsm_get_text(message: Message, state: FSMContext):
     await state.update_data(text=message.text)
     await message.answer('Введите время в формате ЧЧ:ММ (24ч):')
@@ -65,6 +69,7 @@ async def fsm_get_text(message: Message, state: FSMContext):
 
 
 @router.message(CreateSchedule.waiting_for_time)
+@log_function
 async def fsm_get_time(message: Message, state: FSMContext):
     try:
         parts = message.text.split(':')
@@ -80,26 +85,25 @@ async def fsm_get_time(message: Message, state: FSMContext):
         text = data['text']
         user_id = message.from_user.id
 
-        # Сохраняем в БД (асинхронно)
         async with async_session() as session:
             task = Schedule(user_id=user_id, text=text, time=t, active=True)
             session.add(task)
             await session.commit()
             await session.refresh(task)
         logger.info(f'Создана рассылка: user_id={user_id}, task_id={task.id}, time={t}')
-        # Добавляем в планировщик
         await schedule_manager.add_job(task.id, user_id, text, t)
         logger.info(f'Задача добавлена в планировщик: task_id={task.id}')
 
         await message.answer(f'Рассылка создана и запланирована на {t.strftime('%H:%M')}')
         await state.clear()
     except Exception as e:
-        logger.exception(f'Ошибка при создании рассылки: {e}')
+        logger.warning(f'Ошибка при создании рассылки: {e}')
         await message.answer('Неверный формат времени. Попробуйте снова: ЧЧ:ММ')
 
 
 @router.message(Command('jobs'))
 @router.message(F.text == 'СПИСОК РАССЫЛОК')
+@log_function
 async def cmd_jobs(message: Message):
     if not is_admin(message):
         return
@@ -132,6 +136,7 @@ async def cmd_jobs(message: Message):
 
 @router.message(Command('delete'))
 @router.message(F.text == 'УДАЛИТЬ РАССЫЛКУ')
+@log_function
 async def delete_command(message: Message, state: FSMContext):
     async with async_session() as session:
         result = await session.execute(select(Schedule).where(Schedule.user_id == message.from_user.id))
@@ -151,6 +156,7 @@ async def delete_command(message: Message, state: FSMContext):
 
 
 @router.message(DeleteSchedule.waiting_for_task_id)
+@log_function
 async def process_delete(message: Message, state: FSMContext):
     try:
         task_id = int(message.text.strip())
